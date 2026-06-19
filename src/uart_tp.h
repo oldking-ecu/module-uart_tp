@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file uart_tp.h
  * @author wwyyy (1046685883@qq.com)
  * @link https://gitee.com/oldking-ecu
@@ -23,16 +23,20 @@
  */
 // #define MINIMUM_RAM__
 
+/**
+ * @brief 支持的组帧类型,crc16和len16等多字节统一是小端
+ *
+ */
 typedef enum {
-	UARTTP_TYPE_INVT = 0,
-	UARTTP_TYPE_1A,    // HeadMark(AA55) len [data ... ] crc TailMark(BBCC)
-	UARTTP_TYPE_1B,    // HeadMark(AA55) len [data ... ] crc
-	UARTTP_TYPE_2A,    //(转义)HeadMark(7E) [data ... crc] TailMark(7E)
-	UARTTP_TYPE_2B,    //(转义)[data ... crc] TailMark(7E)
-	UARTTP_TYPE_3A,
-	UARTTP_TYPE_3B,    //["qaz123aabbcdsadsadf" CRC16(ASCII) TailMark(0x00)]
-	UARTTP_TYPE_4A,    //[HeadMark(:) "00112233445566778899AABBCCDDEEFF" CRC16(ASCII) TailMark(\r\n)]
-	UARTTP_TYPE_4B,    //["00112233445566778899AABBCCDDEEFF" CRC16(ASCII) TailMark(\r\n)]
+	UARTTP_TYPE_INVT = 0,// [data ... ] crc16 <--时间间隔--> [data ... ] crc16 <--时间间隔-->
+	UARTTP_TYPE_1A,      // HeadMark1A len16 [data ... ] crc16 TailMark1A
+	UARTTP_TYPE_1B,      // HeadMark1B len16 [data ... ] crc16
+	UARTTP_TYPE_2A,      // HeadMark(7E) [data(转义) ... ] crc16(转义) TailMark(7E)
+	UARTTP_TYPE_2B,      // [data(转义) ...] crc16(转义) TailMark(7E)
+	UARTTP_TYPE_3A,      // HeadMark3A ["qaz123aabbcdsadsadf"] crc16(AsciiHex) TailMark3A
+	UARTTP_TYPE_3B,      // ["qaz123aabbcdsadsadf"] crc16(AsciiHex) TailMark3B
+	UARTTP_TYPE_4A,      // HeadMark4A ["00112233445566778899AABBCCDDEEFF"] crc16(AsciiHex) TailMark4A
+	UARTTP_TYPE_4B,      // ["00112233445566778899AABBCCDDEEFF"] crc16(AsciiHex) TailMark4B
 } UARTTP_ENUM_TYPE;
 
 /**
@@ -64,11 +68,11 @@ typedef struct {
 	uint8 RxStatus;
 	uint16 RxFmIdx;        // 解析buff中尾指针,不包括
 	uint16 RxParseSize;    // 协议中长度字段或head和tail之间包裹的长度
-	uint16 RxErrCntCrc;
-	uint16 RxErrCntShor;
-	uint16 RxErrCntLong;
-	uint16 RxErrCntOdd;
-	uint16 RxErrCntContext;
+	uint16 RxErrCntCrc;		// crc错误计数器
+	uint16 RxErrCntShor;	// 帧太短错误计数器
+	uint16 RxErrCntLong;	//帧太长错误计数器
+	uint16 RxErrCntOdd;		//仅对于4A/4B类型，数据长度为奇数错误计数器
+	uint16 RxErrCntContext;	//仅对于4A/AB类型，数据内容不是0-9-a-f错误
 	uint32 RxTimstamp;
 	uint8 TxBusy;
 	uint16 TxBlkSize;
@@ -83,7 +87,7 @@ typedef struct {
 	const MODULE_INS_CFG_TYPE(UartTp) * InsCfgPtr;
 	MODULE_INS_INF_TYPE(UartTp) * InsInfPtr;
 	uint8 InsNum;
-	uint8 *Pbuff;    // 用于临时存储发送原始数据和接收临时解包缓存
+	uint8 *Pbuff;    // 4A、4B用于临时存储发送原始数据和接收临时解包缓存
 	uint16 PbufSz;
 	// void (*RxIndication_FuncPtr)(uint8 ins, uint8 *rxData, uint16 size);    // 接收一包数据回调函数
 	void (*TxIndication_FuncPtr)(uint8 ins, uint8 txing);    // 发送开始和结束分别回调Txing为1和0，一般用于485 SET DIR为接收

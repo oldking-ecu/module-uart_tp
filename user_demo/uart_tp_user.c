@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file uart_tp_user.c
  * @author wwyyy (1046685883@qq.com)
  * @link https://gitee.com/oldking-ecu
@@ -69,9 +69,12 @@ MODULE_CFG(UartTp) = {0};
  */
 void MODULE_USERINIT_FUN(UartTp)(void)
 {
+	static uint8 buff[1024];
 	MODULE_CFG(UartTp).InsCfgPtr = MODULE_INS_CFG(UartTp);
 	MODULE_CFG(UartTp).InsInfPtr = MODULE_INS_INF(UartTp);
 	MODULE_CFG(UartTp).InsNum = ARRAY_SIZE(MODULE_INS_CFG(UartTp));
+	MODULE_CFG(UartTp).Pbuff = buff;
+	MODULE_CFG(UartTp).PbufSz = sizeof(buff);
 	MODULE_CFG(UartTp).TxIndication_FuncPtr = NULL;
 	MODULE_CFG(UartTp).GetSysTick_FuncPtr = Tim_GetTick;
 	MODULE_CFG(UartTp).UartInit_FuncPtr = McuUart_UserInit;
