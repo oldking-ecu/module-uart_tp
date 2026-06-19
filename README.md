@@ -1,4 +1,4 @@
-# module-xxx/cdd-xxx
+# module-uart_tp
     主仓：https://gitee.com/oldking-ecu
     镜像：https://github.com/oldking-ecu
 
