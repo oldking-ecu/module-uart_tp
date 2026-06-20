@@ -17,31 +17,35 @@
 #include "public.h"
 
 // 0 head(0xAA55)                           [RawHex ...] Crc16H(RawHex) Crc16L(RawHex) tail(0xAA55) 漏洞:提前截断数据;校验不通过继续往后看，直到触发buff满自动清空;
-// 1A head(0xAA55) LenH(RawHex) LenL(RawHex) [RawHex ...] Crc16H(RawHex) Crc16L(RawHex) tail(0xAA55) 当len错误提前截断且crc凑上，tail可以冗余检查，len错误变短或len错误边长触发超时：跳过当前head重新找head;
+// 1A HeadMark1A LenH(RawHex) LenL(RawHex) [RawHex ...] Crc16H(RawHex) Crc16L(RawHex) TailMark1A 当len错误提前截断且crc凑上，tail可以冗余检查，len错误变短或len错误边长触发超时：跳过当前head重新找head;
 // 2                                        [RawHex ...] Crc16H(RawHex) Crc16L(RawHex) tail(0xAA55) 漏洞:提前截断数据;校验不通过继续往后看，直到触发buff满自动清空;
-// 1B head(0xAA55) LenH(RawHex) LenL(RawHex) [RawHex ...] Crc16H(RawHex) Crc16L(RawHex)              最优方案
+// 1B HeadMark1B LenH(RawHex) LenL(RawHex) [RawHex ...] Crc16H(RawHex) Crc16L(RawHex)              最优方案
+
 // 2A:转义方案1 HeadMark(0x7E) data[n] CRC16 TailMark(0x7E)
 // 5:转义方案2 HeadMark(0x7E) data[n] CRC16 TailMark(0x7E)
-// 2B:基于4,无头 data[n] CRC16 TailMark(0x7E)
-// 3A:[HeadMark(0x00) "qaz123aabbcdsadsadf" CRC16(ASCII) TailMark(0x00)]
-// 3B:["qaz123aabbcdsadsadf" CRC16(ASCII) TailMark(0x00)] 用于ascii传输
-// 4A:[HeadMark(:) "00112233445566778899AABBCCDDEEFF" CRC16(ASCII) TailMark(\r\n)]
-// 4B:["00112233445566778899AABBCCDDEEFF" CRC16(ASCII) TailMark(\r\n)]
+// 2B:基于2A,无头 data[n] CRC16 TailMark(0x7E)
+
+// 3A:[HeadMark3A "qaz123aabbcdsadsadf" CRC16(ASCII) TailMark3A]
+// 3B:["qaz123aabbcdsadsadf" CRC16(ASCII) TailMark3B] 用于ascii传输
+
+// 4A:[HeadMark4A "00112233445566778899AABBCCDDEEFF" CRC16(ASCII) TailMark4A]
+// 4B:["00112233445566778899AABBCCDDEEFF" CRC16(ASCII) TailMark4B]
 
 /**
  * @brief 头定义
  *
  */
-static const uint8 HeadMark1A[] = {0xAA,0x55};
-static const uint8 TailMark1A[] = {0x55};
-static const uint8 HeadMark1B[] = {0x55,0xAA};
-static const uint8 HeadMark3A[] = {0x02};
-static const uint8 TailMark3A[] = {0x03};
-static const uint8 TailMark3B[] = {0x03};
-static const uint8 HeadMark4A[] = {'<'};
-static const uint8 TailMark4A[] = {'>'};
-static const uint8 TailMark4B[] = {'>', '<'};
+static const char HeadMark1A[] = {0xAA,0x55};
+static const char TailMark1A[] = {0x55};
+static const char HeadMark1B[] = {0x55,0xAA};
+static const char HeadMark3A[] = {0x02};
+static const char TailMark3A[] = {0x03};
+static const char TailMark3B[] = {0x03};
+static const char HeadMark4A[] = {'<'};
+static const char TailMark4A[] = {'>'};
+static const char TailMark4B[] = {'>', '<'};
 #define CHECK_CRC_LEN 2
+#define PARSE_LEN16_LEN 2
 
 /**
  * @brief 状态定义(分配RW_MEM
@@ -116,11 +120,11 @@ static void UartTp_Main1A(uint8 ins)
 	if (INSINF(RxFmIdx)) {
 		if (0 == INSINF(RxStatus)) {    // 解析头&len
 			idx = 0;
-			while (idx + sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)) <= INSINF(RxFmIdx)) {
+			while (idx + sizeof(HeadMark1A) + PARSE_LEN16_LEN <= INSINF(RxFmIdx)) {
 				if (!memcmp(INSCFG(RxFmBuf) + idx, HeadMark1A, sizeof(HeadMark1A))) {
 					INSINF(RxParseSize) = Combine2BytesLittle(INSCFG(RxFmBuf) + idx + sizeof(HeadMark1A));
 					if (INSINF(RxParseSize) &&
-						sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize) + CHECK_CRC_LEN + sizeof(TailMark1A) <= INSCFG(RxFmBufSz)) {    // 错误长度
+						sizeof(HeadMark1A) + PARSE_LEN16_LEN + INSINF(RxParseSize) + CHECK_CRC_LEN + sizeof(TailMark1A) <= INSCFG(RxFmBufSz)) {    // 错误长度
 						INSINF(RxStatus) = 1;                                                                                           // 解析长度
 						break;
 					}
@@ -133,15 +137,15 @@ static void UartTp_Main1A(uint8 ins)
 			}
 		} else if (1 == INSINF(RxStatus)) {//等待长度收齐
 			if (INSINF(RxFmIdx) >=
-				sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize) + CHECK_CRC_LEN + sizeof(TailMark1A)) {    // 收齐
-				if (!memcmp(INSCFG(RxFmBuf) + sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize) + CHECK_CRC_LEN, TailMark1A, sizeof(TailMark1A)) &&
-					Combine2BytesLittle(INSCFG(RxFmBuf) + sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize)) ==
-						Crc16ModbusBlockCalc(INSCFG(RxFmBuf) + sizeof(HeadMark1A), sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize))) {
+				sizeof(HeadMark1A) + PARSE_LEN16_LEN + INSINF(RxParseSize) + CHECK_CRC_LEN + sizeof(TailMark1A)) {    // 收齐
+				if (!memcmp(INSCFG(RxFmBuf) + sizeof(HeadMark1A) + PARSE_LEN16_LEN + INSINF(RxParseSize) + CHECK_CRC_LEN, TailMark1A, sizeof(TailMark1A)) &&
+					Combine2BytesLittle(INSCFG(RxFmBuf) + sizeof(HeadMark1A) + PARSE_LEN16_LEN + INSINF(RxParseSize)) ==
+						Crc16ModbusBlockCalc(INSCFG(RxFmBuf) + sizeof(HeadMark1A), PARSE_LEN16_LEN + INSINF(RxParseSize))) {
 					if (INSCFG(RxIndication_FuncPtr)) {
 						INSCFG(RxIndication_FuncPtr)
-						(INSCFG(RxFmBuf) + sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)), INSINF(RxParseSize));
+						(INSCFG(RxFmBuf) + sizeof(HeadMark1A) + PARSE_LEN16_LEN, INSINF(RxParseSize));
 					}
-					idx = sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize) + CHECK_CRC_LEN + sizeof(TailMark1A);
+					idx = sizeof(HeadMark1A) + PARSE_LEN16_LEN + INSINF(RxParseSize) + CHECK_CRC_LEN + sizeof(TailMark1A);
 				} else {
 					idx = 1;    // 错误的帧
 				}
@@ -178,11 +182,11 @@ static void UartTp_Main1B(uint8 ins)
 	if (INSINF(RxFmIdx)) {
 		if (0 == INSINF(RxStatus)) {    // 解析头 & len
 			idx = 0;
-			while (idx + sizeof(HeadMark1B) + sizeof(INSINF(RxParseSize)) <= INSINF(RxFmIdx)) {
+			while (idx + sizeof(HeadMark1B) + PARSE_LEN16_LEN <= INSINF(RxFmIdx)) {
 				if (!memcmp(INSCFG(RxFmBuf) + idx, HeadMark1B, sizeof(HeadMark1B))) {
 					INSINF(RxParseSize) = Combine2BytesLittle(INSCFG(RxFmBuf) + idx + sizeof(HeadMark1B));
 					if (INSINF(RxParseSize) &&
-						sizeof(HeadMark1B) + sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize) + CHECK_CRC_LEN <= INSCFG(RxFmBufSz)) {
+						sizeof(HeadMark1B) + PARSE_LEN16_LEN + INSINF(RxParseSize) + CHECK_CRC_LEN <= INSCFG(RxFmBufSz)) {
 						INSINF(RxStatus) = 1;    // 解析长度
 						break;
 					}
@@ -195,14 +199,14 @@ static void UartTp_Main1B(uint8 ins)
 			}
 		} else if (1 == INSINF(RxStatus)) {
 			if (INSINF(RxFmIdx) >=
-				sizeof(HeadMark1B) + sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize) + CHECK_CRC_LEN) {    // 收齐
-				if (Combine2BytesLittle(INSCFG(RxFmBuf) + sizeof(HeadMark1B) + sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize)) ==
-					Crc16ModbusBlockCalc(INSCFG(RxFmBuf) + sizeof(HeadMark1B), sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize))) {
+				sizeof(HeadMark1B) + PARSE_LEN16_LEN + INSINF(RxParseSize) + CHECK_CRC_LEN) {    // 收齐
+				if (Combine2BytesLittle(INSCFG(RxFmBuf) + sizeof(HeadMark1B) + PARSE_LEN16_LEN + INSINF(RxParseSize)) ==
+					Crc16ModbusBlockCalc(INSCFG(RxFmBuf) + sizeof(HeadMark1B), PARSE_LEN16_LEN + INSINF(RxParseSize))) {
 					if (INSCFG(RxIndication_FuncPtr)) {
 						INSCFG(RxIndication_FuncPtr)
-						(INSCFG(RxFmBuf) + sizeof(HeadMark1B) + sizeof(INSINF(RxParseSize)), INSINF(RxParseSize));
+						(INSCFG(RxFmBuf) + sizeof(HeadMark1B) + PARSE_LEN16_LEN, INSINF(RxParseSize));
 					}
-					idx = sizeof(HeadMark1B) + sizeof(INSINF(RxParseSize)) + INSINF(RxParseSize) + CHECK_CRC_LEN;
+					idx = sizeof(HeadMark1B) + PARSE_LEN16_LEN + INSINF(RxParseSize) + CHECK_CRC_LEN;
 				} else {
 					idx = 1;    // 错误帧，错开重新找
 				}
@@ -732,30 +736,30 @@ void MODULE_MAIN_FUN(UartTp)(void)
 			case UARTTP_TYPE_INVT:
 				UartTp_MainINVT(ins);
 				break;
-//			case UARTTP_TYPE_1A:
-//				UartTp_Main1A(ins);
-//				break;
-//			case UARTTP_TYPE_1B:
-//				UartTp_Main1B(ins);
-//				break;
-//			case UARTTP_TYPE_2A:
-//				UartTp_Main2A(ins);
-//				break;
-//			case UARTTP_TYPE_2B:
-//				UartTp_Main2B(ins);
-//				break;
-//			case UARTTP_TYPE_3A:
-//				UartTp_Main3A(ins);
-//				break;
-//			case UARTTP_TYPE_3B:
-//				UartTp_Main3B(ins);
-//				break;
-//			case UARTTP_TYPE_4A:
-//				UartTp_Main4A(ins);
-//				break;
-//			case UARTTP_TYPE_4B:
-//				UartTp_Main4B(ins);
-//				break;
+			case UARTTP_TYPE_1A:
+				UartTp_Main1A(ins);
+				break;
+			case UARTTP_TYPE_1B:
+				UartTp_Main1B(ins);
+				break;
+			case UARTTP_TYPE_2A:
+				UartTp_Main2A(ins);
+				break;
+			case UARTTP_TYPE_2B:
+				UartTp_Main2B(ins);
+				break;
+			case UARTTP_TYPE_3A:
+				UartTp_Main3A(ins);
+				break;
+			case UARTTP_TYPE_3B:
+				UartTp_Main3B(ins);
+				break;
+			case UARTTP_TYPE_4A:
+				UartTp_Main4A(ins);
+				break;
+			case UARTTP_TYPE_4B:
+				UartTp_Main4B(ins);
+				break;
 			default:
 				break;
 		}
@@ -876,42 +880,49 @@ uint8 *UartTp_GetTransBuf(uint8 ins, uint16 size)
 	}
 	if (UARTTP_TYPE_INVT == INSCFG(Type)) {    //[data ... ] crc <--时间间隔--> [data ... ] crc
 		if (size + CHECK_CRC_LEN /*CRC16*/ > INSCFG(TxFmBufSz)) {
+		    INSINF(TxErrCntOverflow)++;
 			return NULL;
 		}
 		INSINF(TxBlkSize) = size;
 		return INSCFG(TxFmBuf);
 	} else if (UARTTP_TYPE_1A == INSCFG(Type)) {    // head len [data ... ] crc tail
-		if (sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)) + size + CHECK_CRC_LEN + sizeof(TailMark1A) > INSCFG(TxFmBufSz)) {
+		if (sizeof(HeadMark1A) + PARSE_LEN16_LEN + size + CHECK_CRC_LEN + sizeof(TailMark1A) > INSCFG(TxFmBufSz)) {
+		    INSINF(TxErrCntOverflow)++;
 			return NULL;
 		}
 		INSINF(TxBlkSize) = size;
-		return INSCFG(TxFmBuf) + sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize));
+		return INSCFG(TxFmBuf) + sizeof(HeadMark1A) + PARSE_LEN16_LEN;
 	} else if (UARTTP_TYPE_1B == INSCFG(Type)) {    // head len [data ... ] crc
-		if (sizeof(HeadMark1B) + sizeof(INSINF(RxParseSize)) + size + CHECK_CRC_LEN > INSCFG(TxFmBufSz)) {
+		if (sizeof(HeadMark1B) + PARSE_LEN16_LEN + size + CHECK_CRC_LEN > INSCFG(TxFmBufSz)) {
+		    INSINF(TxErrCntOverflow)++;
 			return NULL;
 		}
 		INSINF(TxBlkSize) = size;
-		return INSCFG(TxFmBuf) + sizeof(HeadMark1B) + sizeof(INSINF(RxParseSize));
+		return INSCFG(TxFmBuf) + sizeof(HeadMark1B) + PARSE_LEN16_LEN;
 	} else if (UARTTP_TYPE_2A == INSCFG(Type) || UARTTP_TYPE_2B == INSCFG(Type)) {    // 转义head [data ... crc] tail
 		if (size + CHECK_CRC_LEN > GCFG(PbufSz)) {
+		    INSINF(TxErrCntOverflow)++;
 			return NULL;
 		}
 		INSINF(TxBlkSize) = size;
 		return GCFG(Pbuff);
 	} else if (UARTTP_TYPE_3A == INSCFG(Type)) {    //[HeadMark(0x00) "qaz123aabbcdsadsadf" CRC16(ASCII) TailMark(0x00)]
 		if (sizeof(HeadMark3A) + size + CHECK_CRC_LEN * 2 + sizeof(TailMark3A) > INSCFG(TxFmBufSz)) {
+		    INSINF(TxErrCntOverflow)++;
 			return NULL;
 		}
 		INSINF(TxBlkSize) = size;
 		return INSCFG(TxFmBuf) + sizeof(HeadMark3A);
 	} else if (UARTTP_TYPE_3B == INSCFG(Type)) {    //["qaz123aabbcdsadsadf" CRC16(ASCII) TailMark(0x00)]
 		if (size + CHECK_CRC_LEN * 2 + sizeof(TailMark3B) > INSCFG(TxFmBufSz)) {
+		    INSINF(TxErrCntOverflow)++;
 			return NULL;
 		}
 		INSINF(TxBlkSize) = size;
 		return INSCFG(TxFmBuf);
 	} else if (UARTTP_TYPE_4A == INSCFG(Type)) {    //[HeadMark(<) "00112233445566778899AABBCCDDEEFF" CRC16(ASCII) TailMark(>)]
 		if (sizeof(HeadMark4A) + size * 2 + CHECK_CRC_LEN * 2 + sizeof(TailMark4A) > INSCFG(TxFmBufSz)) {
+		    INSINF(TxErrCntOverflow)++;
 			return NULL;
 		}
 		if (NULL == GCFG(Pbuff) || size * 2 > GCFG(PbufSz))
@@ -920,10 +931,13 @@ uint8 *UartTp_GetTransBuf(uint8 ins, uint16 size)
 		return INSCFG(TxFmBuf) + sizeof(HeadMark4A);
 	} else if (UARTTP_TYPE_4B == INSCFG(Type)) {    //[HeadMark(<) "00112233445566778899AABBCCDDEEFF" CRC16(ASCII) TailMark(>)]
 		if (size * 2 + CHECK_CRC_LEN * 2 + sizeof(TailMark4B) > INSCFG(TxFmBufSz)) {
+		    INSINF(TxErrCntOverflow)++;
 			return NULL;
 		}
-		if (NULL == GCFG(Pbuff) || size * 2 > GCFG(PbufSz))
+		if (NULL == GCFG(Pbuff) || size * 2 > GCFG(PbufSz)) {
+		    INSINF(TxErrCntOverflow)++;
 			return NULL;
+		}
 		INSINF(TxBlkSize) = size;
 		return INSCFG(TxFmBuf);
 	} else {
@@ -951,18 +965,18 @@ static uint8 UartTp_Transmitc(uint8 ins)
 	} else if (UARTTP_TYPE_1A == INSCFG(Type)) {    // head len [data ... ] crc tail
 		memcpy(INSCFG(TxFmBuf), HeadMark1A, sizeof(HeadMark1A));
 		Split2BytesLittle(INSINF(TxBlkSize), INSCFG(TxFmBuf) + sizeof(HeadMark1A));
-		Split2BytesLittle(Crc16ModbusBlockCalc(INSCFG(TxFmBuf) + sizeof(HeadMark1A), sizeof(INSINF(RxParseSize)) + INSINF(TxBlkSize)),
-						  INSCFG(TxFmBuf) + sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)) + INSINF(TxBlkSize));
-		memcpy(INSCFG(TxFmBuf) + sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)) + INSINF(TxBlkSize) + CHECK_CRC_LEN, TailMark1A, sizeof(TailMark1A));
-		if (GCFG(UartTx_FuncPtr)(INSCFG(UartId), INSCFG(TxFmBuf), sizeof(HeadMark1A) + sizeof(INSINF(RxParseSize)) + INSINF(TxBlkSize) + CHECK_CRC_LEN + sizeof(TailMark1A))) {
+		Split2BytesLittle(Crc16ModbusBlockCalc(INSCFG(TxFmBuf) + sizeof(HeadMark1A), PARSE_LEN16_LEN + INSINF(TxBlkSize)),
+						  INSCFG(TxFmBuf) + sizeof(HeadMark1A) + PARSE_LEN16_LEN + INSINF(TxBlkSize));
+		memcpy(INSCFG(TxFmBuf) + sizeof(HeadMark1A) + PARSE_LEN16_LEN + INSINF(TxBlkSize) + CHECK_CRC_LEN, TailMark1A, sizeof(TailMark1A));
+		if (GCFG(UartTx_FuncPtr)(INSCFG(UartId), INSCFG(TxFmBuf), sizeof(HeadMark1A) + PARSE_LEN16_LEN + INSINF(TxBlkSize) + CHECK_CRC_LEN + sizeof(TailMark1A))) {
 			return 1;    // 发送失败
 		}
 	} else if (UARTTP_TYPE_1B == INSCFG(Type)) {    // head len [data ... ] crc
 		memcpy(INSCFG(TxFmBuf), HeadMark1B, sizeof(HeadMark1B));
 		Split2BytesLittle(INSINF(TxBlkSize), INSCFG(TxFmBuf) + sizeof(HeadMark1B));
-		Split2BytesLittle(Crc16ModbusBlockCalc(INSCFG(TxFmBuf) + sizeof(HeadMark1B), INSINF(TxBlkSize) + sizeof(INSINF(RxParseSize))),
-						  INSCFG(TxFmBuf) + sizeof(HeadMark1B) + sizeof(INSINF(RxParseSize)) + INSINF(TxBlkSize));
-		if (GCFG(UartTx_FuncPtr)(INSCFG(UartId), INSCFG(TxFmBuf), sizeof(HeadMark1B) + sizeof(INSINF(RxParseSize)) + INSINF(TxBlkSize) + CHECK_CRC_LEN)) {
+		Split2BytesLittle(Crc16ModbusBlockCalc(INSCFG(TxFmBuf) + sizeof(HeadMark1B), INSINF(TxBlkSize) + PARSE_LEN16_LEN),
+						  INSCFG(TxFmBuf) + sizeof(HeadMark1B) + PARSE_LEN16_LEN + INSINF(TxBlkSize));
+		if (GCFG(UartTx_FuncPtr)(INSCFG(UartId), INSCFG(TxFmBuf), sizeof(HeadMark1B) + PARSE_LEN16_LEN + INSINF(TxBlkSize) + CHECK_CRC_LEN)) {
 			return 1;    // 发送失败
 		}
 	} else if (UARTTP_TYPE_2A == INSCFG(Type)) {    // 转义head [data ... crc] tail
@@ -972,8 +986,10 @@ static uint8 UartTp_Transmitc(uint8 ins)
 		INSCFG(TxFmBuf)
 		[j++] = 0x7E;    // head
 		for (i = 0; i < INSINF(TxBlkSize) + CHECK_CRC_LEN; i++) {
-			if (j >= INSCFG(TxFmBufSz))
+			if (j >= INSCFG(TxFmBufSz)) {
+			    INSINF(TxErrCntOverflow)++;
 				return 1;    // buff满了
+			}
 			if (GCFG(Pbuff)[i] == 0x7E) {
 				INSCFG(TxFmBuf)
 				[j++] = 0x7D;
@@ -1000,8 +1016,10 @@ static uint8 UartTp_Transmitc(uint8 ins)
 		j = 0;
 		// INSCFG(TxFmBuf)[j++] = 0x7E;//head
 		for (i = 0; i < INSINF(TxBlkSize) + CHECK_CRC_LEN; i++) {
-			if (j >= INSCFG(TxFmBufSz))
+			if (j >= INSCFG(TxFmBufSz)) {
+			    INSINF(TxErrCntOverflow)++;
 				return 1;    // buff满了
+			}
 			if (GCFG(Pbuff)[i] == 0x7E) {
 				INSCFG(TxFmBuf)
 				[j++] = 0x7D;

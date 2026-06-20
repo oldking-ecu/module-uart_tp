@@ -29,6 +29,7 @@ static void UserRxIndication_FuncPtr(uint8 *rxData, uint16 size)
 	uint8 *buff;
 	if ((buff = UartTp_GetTransBuf(UartTp_INS_ONE, size)) != NULL) {
 		memcpy(buff, rxData, size);
+		buff[0]++;
 		UartTp_TransmitSync(UartTp_INS_ONE);
 	}
 }
@@ -44,7 +45,7 @@ static const MODULE_INS_CFG_TYPE(UartTp) MODULE_INS_CFG(UartTp)[MODULE_ENUM_NAME
 	 .RxFmBuf = RxFrame,
 	 .RxFmBufSz = sizeof(RxFrame),
 	 .RxFmOverTimeMs = 3,
-	 .RxIndication_FuncPtr = IapCmd_UserRecvPacketUart,
+	 .RxIndication_FuncPtr = UserRxIndication_FuncPtr,//IapCmd_UserRecvPacketUart,
 	 .TxFmBuf = TxFrame,
 	 .TxFmBufSz = sizeof(TxFrame),
 	 .TxFmInvtTimeMs = 3},

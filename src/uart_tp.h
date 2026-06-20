@@ -76,6 +76,7 @@ typedef struct {
 	uint32 RxTimstamp;
 	uint8 TxBusy;
 	uint16 TxBlkSize;
+	uint16 TxErrCntOverflow;
 	uint32 TxTimstamp;
 } MODULE_INS_INF_TYPE(UartTp);
 
@@ -87,7 +88,7 @@ typedef struct {
 	const MODULE_INS_CFG_TYPE(UartTp) * InsCfgPtr;
 	MODULE_INS_INF_TYPE(UartTp) * InsInfPtr;
 	uint8 InsNum;
-	uint8 *Pbuff;    // 4A、4B用于临时存储发送原始数据和接收临时解包缓存
+	uint8 *Pbuff;    // 2A/B 4A/B用于存储发送原始数据
 	uint16 PbufSz;
 	// void (*RxIndication_FuncPtr)(uint8 ins, uint8 *rxData, uint16 size);    // 接收一包数据回调函数
 	void (*TxIndication_FuncPtr)(uint8 ins, uint8 txing);    // 发送开始和结束分别回调Txing为1和0，一般用于485 SET DIR为接收
